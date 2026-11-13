@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Build output
+dist/
+**/dist/
+build/
+**/build/
+
+# Expo
+.expo/
+web-build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Android generated files and credentials
+**/.gradle/
+**/local.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+
+# OS files
+.DS_Store
+Thumbs.db
+# Nested Android build caches
+**/.gradle/
+**/build/
+**/local.properties
+
+# Debug signing credentials
+**/debug.keystore
+
+# Claude local settings
+.claude/
