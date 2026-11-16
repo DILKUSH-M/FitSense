@@ -4,6 +4,8 @@ const userSchema = new mongoose.Schema({
   name: { type: String, required: true, trim: true, maxlength: 100 },
   email: { type: String, required: true, unique: true, lowercase: true },
   password: { type: String, required: true },
+  isDemoProfile: { type: Boolean, default: false },
+  historySampleEndDay: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
   age: { type: Number, min: 13, max: 120, default: 28 },
   height: { type: Number, min: 80, max: 250, default: 170 },
   weight: { type: Number, min: 25, max: 400, default: 68 },

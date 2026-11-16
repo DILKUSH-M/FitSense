@@ -10,15 +10,25 @@ const emptyForm = {
   reps: 10,
   weight: 0,
   durationMinutes: 30,
-  workoutDate: new Date().toISOString().slice(0, 16),
+  workoutDate: '',
   notes: '',
 };
 
 const categories = ['Chest', 'Back', 'Shoulders', 'Arms', 'Legs', 'Core', 'Full body', 'Cardio', 'Flexibility'];
 
+function formatLocalDateTime(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+function sourceLabel(workout) {
+  if (workout.source === 'sample_generated') return 'Historical sample data (generated)';
+  return 'User entered';
+}
+
 export default function WorkoutsPage() {
   const [workouts, setWorkouts] = useState([]);
-  const [form, setForm] = useState(emptyForm);
+  const [form, setForm] = useState({ ...emptyForm, workoutDate: formatLocalDateTime() });
   const [search, setSearch] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -61,7 +71,7 @@ export default function WorkoutsPage() {
   const handleChange = (event) => setForm((prev) => ({ ...prev, [event.target.name]: event.target.value }));
 
   const resetForm = () => {
-    setForm({ ...emptyForm, workoutDate: new Date().toISOString().slice(0, 16) });
+    setForm({ ...emptyForm, workoutDate: formatLocalDateTime() });
     setEditingId(null);
   };
 
@@ -77,6 +87,7 @@ export default function WorkoutsPage() {
       weight: Number(form.weight),
       durationMinutes: Number(form.durationMinutes),
       workoutDate: new Date(form.workoutDate).toISOString(),
+      dayKey: form.workoutDate.slice(0, 10),
     };
 
     try {
@@ -106,7 +117,7 @@ export default function WorkoutsPage() {
       reps: workout.reps,
       weight: workout.weight,
       durationMinutes: workout.durationMinutes,
-      workoutDate: new Date(workout.workoutDate).toISOString().slice(0, 16),
+      workoutDate: formatLocalDateTime(workout.workoutDate),
       notes: workout.notes || '',
     });
     document.getElementById('workout-form')?.scrollIntoView({ behavior: 'smooth' });
@@ -186,14 +197,21 @@ export default function WorkoutsPage() {
                   <div>
                     <div className="font-medium text-white">{workout.exerciseName}</div>
                     <div className="text-sm text-slate-400">{workout.category} · {new Date(workout.workoutDate).toLocaleString()}</div>
+                    <div className={`text-xs ${workout.historicalBaseline ? 'text-amber-200/80' : 'text-slate-500'}`}>{sourceLabel(workout)}</div>
                   </div>
                   <div className="flex items-center gap-3">
                     <div className="text-right text-sm text-slate-300">
                       <div>{workout.sets} × {workout.reps} · {workout.weight} kg</div>
                       <div>{workout.durationMinutes} min</div>
                     </div>
-                    <button type="button" onClick={() => editWorkout(workout)} aria-label={`Edit ${workout.exerciseName}`} className="rounded-lg p-2 text-slate-300 hover:bg-slate-700"><Pencil size={15} /></button>
-                    <button type="button" onClick={() => removeWorkout(workout._id)} aria-label={`Delete ${workout.exerciseName}`} className="rounded-lg p-2 text-rose-300 hover:bg-slate-700"><Trash2 size={15} /></button>
+                    {workout.historicalBaseline ? (
+                      <span className="px-2 text-xs text-slate-500">Read-only baseline</span>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => editWorkout(workout)} aria-label={`Edit ${workout.exerciseName}`} className="rounded-lg p-2 text-slate-300 hover:bg-slate-700"><Pencil size={15} /></button>
+                        <button type="button" onClick={() => removeWorkout(workout._id)} aria-label={`Delete ${workout.exerciseName}`} className="rounded-lg p-2 text-rose-300 hover:bg-slate-700"><Trash2 size={15} /></button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))}

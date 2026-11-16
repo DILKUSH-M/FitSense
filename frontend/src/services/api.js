@@ -11,7 +11,9 @@ export const getCurrentUser = () => api.get('/auth/me');
 export const logoutUser = () => api.post('/auth/logout');
 export const updateProfile = (payload) => api.put('/auth/profile', payload);
 
-export const getDashboardSummary = () => api.get('/dashboard/summary');
+export const getDashboardSummary = () => api.get('/dashboard/summary', {
+  headers: { 'X-Time-Zone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
+});
 export const getAnalytics = () => api.get('/dashboard/analytics');
 export const getWorkouts = (params) => api.get('/workouts', { params });
 export const createWorkout = (payload) => api.post('/workouts', payload);

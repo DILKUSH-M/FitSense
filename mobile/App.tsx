@@ -365,24 +365,23 @@ export default function App() {
     try {
       const todayKey = localDayKey(new Date());
       const todayActivities = dashboard.recentActivities
-        .filter((activity) => localDayKey(new Date(activity.date)) === todayKey);
+        .filter((activity) => (
+          !activity.historicalBaseline
+          && (activity.dayKey || localDayKey(new Date(activity.date))) === todayKey
+        ));
       const waterActivities = todayActivities.filter((activity) => activity.waterIntakeMl > 0);
-      const primaryRecord = waterActivities[0] || todayActivities[0];
+      const primaryRecord = waterActivities[0];
 
       if (primaryRecord) {
         await updateActivityWater(primaryRecord._id, nextMl);
         for (const activity of waterActivities) {
           if (activity._id !== primaryRecord._id) await updateActivityWater(activity._id, 0);
         }
-      } else if (nextMl > 0) {
+      } else {
         await createActivity({
           date: new Date().toISOString(),
-          steps: 0,
-          distanceKm: 0,
-          caloriesBurned: 0,
-          activeMinutes: 0,
+          dayKey: todayKey,
           waterIntakeMl: nextMl,
-          goal: 8000,
           source: 'manual',
         });
       }
@@ -684,6 +683,9 @@ export default function App() {
         {notice ? <Text accessibilityRole="status" style={styles.notice}>{notice}</Text> : null}
         {screen === 'dashboard' ? (
           <>
+            {dashboard.historicalData?.hasHistoricalSampleData ? (
+              <Text style={styles.sampleNotice}>Historical sample data is included; generated values are illustrative, not measured activity.</Text>
+            ) : null}
             <Card title="Phone step tracking">
               <Text style={styles.caption}>
                 Steps are the only automatically tracked metric. FitSense uses Health Connect or the Android step sensor; GPS is not used to count steps.
@@ -894,5 +896,6 @@ const styles = StyleSheet.create({
   linkText: { color: '#bef264', fontSize: 13, fontWeight: '700', textAlign: 'center', paddingVertical: 10 },
   error: { color: '#fecaca', backgroundColor: '#7f1d1d', borderRadius: 12, padding: 12, overflow: 'hidden' },
   notice: { color: '#d9f99d', backgroundColor: '#1a2e05', borderRadius: 12, padding: 12, overflow: 'hidden' },
+  sampleNotice: { color: '#fde68a', fontSize: 12, lineHeight: 18, backgroundColor: '#451a03', borderRadius: 12, padding: 12, overflow: 'hidden' },
   warning: { color: '#fde68a', fontSize: 13, lineHeight: 19 },
 });

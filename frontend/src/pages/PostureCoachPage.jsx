@@ -16,6 +16,14 @@ const CONNECTIONS = [
   [24, 26], [26, 28], [27, 31], [28, 32],
 ];
 
+function getErrorMessage(error) {
+  if (typeof error === 'string' && error) return error;
+  if (error instanceof Error) return error.message || error.name;
+  if (typeof error?.message === 'string' && error.message) return error.message;
+  if (typeof error?.name === 'string' && error.name) return error.name;
+  return 'Unknown browser error';
+}
+
 function drawPose(canvas, video, landmarks) {
   if (!canvas || !video.videoWidth || !video.videoHeight) return;
 
@@ -155,7 +163,7 @@ export default function PostureCoachPage() {
         setFraming({ ready: false, message: 'Pose model ready. Stand in view while the camera checks your framing.' });
       } catch (error) {
         if (!cancelled) {
-          setModelError(`Pose model could not be loaded: ${error.message}. Check your internet connection and try again.`);
+          setModelError(`Pose model could not be loaded: ${getErrorMessage(error)}. Stop and restart the camera to retry.`);
           setFraming({ ready: false, message: 'Pose assessment is unavailable until the model loads.' });
         }
       }
@@ -207,7 +215,7 @@ export default function PostureCoachPage() {
             setFormCue('');
           }
         } catch (error) {
-          setModelError(`Pose analysis stopped: ${error.message}`);
+          setModelError(`Pose analysis stopped: ${getErrorMessage(error)}`);
           setFraming({ ready: false, message: 'Unable to analyze this camera frame. Stop and restart the camera to try again.' });
           return;
         }

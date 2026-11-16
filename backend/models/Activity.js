@@ -9,9 +9,25 @@ const activitySchema = new mongoose.Schema({
   activeMinutes: { type: Number, min: 0, max: 1440, default: 0 },
   waterIntakeMl: { type: Number, min: 0, max: 20000, default: 0 },
   goal: { type: Number, min: 1, max: 200000, default: 8000 },
-  source: { type: String, enum: ['manual', 'estimated', 'automatic'], default: 'manual' },
+  source: {
+    type: String,
+    enum: ['manual', 'estimated', 'automatic', 'public_dataset', 'sample_generated', 'user_entered', 'mixed'],
+    default: 'user_entered',
+  },
+  sourceMetadata: { type: mongoose.Schema.Types.Mixed, default: undefined },
+  availableMetrics: {
+    type: [String],
+    enum: ['steps', 'distanceKm', 'caloriesBurned', 'activeMinutes', 'waterIntakeMl'],
+    default: undefined,
+  },
+  dayKey: { type: String, match: /^\d{4}-\d{2}-\d{2}$/ },
+  historicalBaseline: { type: Boolean, default: false },
   notes: { type: String, default: '' },
 }, { timestamps: true });
 
 activitySchema.index({ user: 1, date: -1 });
+activitySchema.index(
+  { user: 1, dayKey: 1 },
+  { unique: true, partialFilterExpression: { historicalBaseline: true } },
+);
 module.exports = mongoose.model('Activity', activitySchema);

@@ -3,69 +3,67 @@ const Activity = require('../models/Activity');
 const Nutrition = require('../models/Nutrition');
 const ActivitySession = require('../models/ActivitySession');
 const DailyStepSummary = require('../models/DailyStepSummary');
-
-function dayKeyAt(date, timeZone) {
-  const parts = new Intl.DateTimeFormat('en', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(date);
-  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function previousDayKey(dayKey, days) {
-  const date = new Date(`${dayKey}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() - days);
-  return date.toISOString().slice(0, 10);
-}
+const { aggregateDashboardHistory } = require('../services/dashboardAggregation');
+const {
+  dayKeyAt,
+  shiftDayKey,
+  weekStartDayKey,
+  isValidTimeZone,
+} = require('../utils/calendar');
 
 async function getDashboardSummary(req, res) {
   const userId = req.user._id;
   const now = new Date();
-  const timeZone = req.user.trackingPreferences?.timeZone || 'UTC';
+  const requestedTimeZone = req.get?.('X-Time-Zone');
+  const storedTimeZone = req.user.trackingPreferences?.timeZone || 'UTC';
+  const timeZone = requestedTimeZone && isValidTimeZone(requestedTimeZone)
+    ? requestedTimeZone
+    : storedTimeZone;
   const todayKey = dayKeyAt(now, timeZone);
-  const daysSinceMonday = (new Date(`${todayKey}T00:00:00.000Z`).getUTCDay() + 6) % 7;
-  const weekStartKey = previousDayKey(todayKey, daysSinceMonday);
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const startOfWeek = new Date(startOfDay);
-  startOfWeek.setDate(startOfDay.getDate() - ((startOfDay.getDay() + 6) % 7));
-
+  const firstDayKey = shiftDayKey(todayKey, -89);
+  const weekStartKey = weekStartDayKey(todayKey);
+  const rangeStart = new Date(`${shiftDayKey(firstDayKey, -1)}T00:00:00.000Z`);
+  const rangeEnd = new Date(`${shiftDayKey(todayKey, 2)}T00:00:00.000Z`);
+  const historyActivityFilter = {
+    user: userId,
+    $or: [
+      { dayKey: { $gte: firstDayKey, $lte: todayKey } },
+      { dayKey: { $exists: false }, date: { $gte: rangeStart, $lt: rangeEnd } },
+    ],
+  };
+  const historyWorkoutFilter = {
+    user: userId,
+    $or: [
+      { dayKey: { $gte: firstDayKey, $lte: todayKey } },
+      { dayKey: { $exists: false }, workoutDate: { $gte: rangeStart, $lt: rangeEnd } },
+    ],
+  };
   const [workouts, activities, nutrition, dailyStepSummaries, sessions] = await Promise.all([
-    Workout.find({ user: userId, workoutDate: { $gte: startOfWeek } }).sort({ workoutDate: -1 }),
-    Activity.find({ user: userId, date: { $gte: startOfWeek } }).sort({ date: -1 }),
-    Nutrition.find({ user: userId, intakeDate: { $gte: startOfDay } }).sort({ intakeDate: -1 }),
-    DailyStepSummary.find({ user: userId, dayKey: { $gte: weekStartKey, $lte: todayKey } }).sort({ dayKey: 1 }),
-    ActivitySession.find({ user: userId, startedAt: { $gte: new Date(`${weekStartKey}T00:00:00.000Z`) } }).sort({ startedAt: -1 }).limit(50),
+    Workout.find(historyWorkoutFilter).sort({ workoutDate: -1 }),
+    Activity.find(historyActivityFilter).sort({ date: -1 }),
+    Nutrition.find({ user: userId, intakeDate: { $gte: rangeStart, $lt: rangeEnd } }).sort({ intakeDate: -1 }),
+    DailyStepSummary.find({ user: userId, dayKey: { $gte: firstDayKey, $lte: todayKey } }).sort({ dayKey: 1 }),
+    ActivitySession.find({ user: userId, startedAt: { $gte: rangeStart, $lt: rangeEnd } }).sort({ startedAt: -1 }).limit(200),
   ]);
-
-  const totalCalories = activities.reduce((sum, item) => sum + (item.caloriesBurned || 0), 0);
-  const totalDuration = workouts.reduce((sum, item) => sum + (item.durationMinutes || 0), 0);
-  const todayActivities = activities.filter((item) => dayKeyAt(item.date, timeZone) === todayKey);
-  const activitiesByDay = new Map();
-  for (const item of activities) {
-    const key = dayKeyAt(item.date, timeZone);
-    const totals = activitiesByDay.get(key) || { steps: 0 };
-    totals.steps += item.steps || 0;
-    activitiesByDay.set(key, totals);
-  }
-  const summariesByDay = new Map(dailyStepSummaries.map((item) => [item.dayKey, item]));
-  const dailySteps = [];
-  for (let daysAgo = daysSinceMonday; daysAgo >= 0; daysAgo -= 1) {
-    const dayKey = previousDayKey(todayKey, daysAgo);
-    dailySteps.push({
-      dayKey,
-      steps: summariesByDay.get(dayKey)?.steps ?? activitiesByDay.get(dayKey)?.steps ?? 0,
-    });
-  }
-  const totalSteps = dailySteps.reduce((sum, item) => sum + item.steps, 0);
-  const todaySteps = summariesByDay.get(todayKey)?.steps ?? activitiesByDay.get(todayKey)?.steps ?? 0;
-  const todayCalories = todayActivities.reduce((sum, item) => sum + (item.caloriesBurned || 0), 0);
-  const todayCaloriesConsumed = nutrition.reduce((sum, item) => sum + (item.calories || 0), 0);
-  const todayActiveMinutes = todayActivities.reduce((sum, item) => sum + (item.activeMinutes || 0), 0);
-  const waterIntakeMl = todayActivities.reduce((sum, item) => sum + (item.waterIntakeMl || 0), 0);
+  const history = aggregateDashboardHistory({
+    activities,
+    stepSummaries: dailyStepSummaries,
+    workouts,
+    todayKey,
+    timeZone,
+  });
+  const currentWeekWorkouts = workouts.filter((item) => {
+    const dayKey = item.dayKey || dayKeyAt(item.workoutDate, timeZone);
+    return dayKey >= weekStartKey && dayKey <= todayKey;
+  });
+  const currentWeekActivities = activities.filter((item) => {
+    const dayKey = item.dayKey || dayKeyAt(item.date, timeZone);
+    return dayKey >= weekStartKey && dayKey <= todayKey;
+  });
+  const today = history.today;
+  const todayCaloriesConsumed = nutrition
+    .filter((item) => dayKeyAt(item.intakeDate, timeZone) === todayKey)
+    .reduce((sum, item) => sum + (item.calories || 0), 0);
   const todaySessions = sessions.filter((session) => dayKeyAt(session.startedAt, timeZone) === todayKey);
   const todaySessionDurationMinutes = todaySessions.reduce((sum, session) => {
     const end = session.endedAt || now;
@@ -73,42 +71,48 @@ async function getDashboardSummary(req, res) {
   }, 0);
   const todaySessionDistanceKm = todaySessions.reduce((sum, session) => sum + session.distanceMeters / 1000, 0);
   const todaySessionCalories = todaySessions.reduce((sum, session) => sum + session.caloriesBurned, 0);
-  const sessionDistanceKm = sessions.reduce((sum, session) => sum + session.distanceMeters / 1000, 0);
-  const sessionDurationMinutes = sessions.reduce((sum, session) => {
+  const currentWeekSessions = sessions.filter((session) => {
+    const dayKey = dayKeyAt(session.startedAt, timeZone);
+    return dayKey >= weekStartKey && dayKey <= todayKey;
+  });
+  const sessionDistanceKm = currentWeekSessions.reduce((sum, session) => sum + session.distanceMeters / 1000, 0);
+  const sessionDurationMinutes = currentWeekSessions.reduce((sum, session) => {
     const end = session.endedAt || now;
     return sum + Math.max(0, (end.getTime() - session.startedAt.getTime()) / 60000);
   }, 0);
   const workoutTarget = Math.max(1, req.user.weeklyWorkoutTarget || 1);
-  const goalCompletion = Math.min(100, Math.round((workouts.length / workoutTarget) * 100));
+  const goalCompletion = Math.min(100, Math.round((history.week.workoutsCompleted / workoutTarget) * 100));
 
   return res.status(200).json({
     success: true,
     summary: {
-      totalSteps,
-      totalCalories,
-      totalDuration,
-      workoutsCompleted: workouts.length,
-      waterIntakeMl,
+      totalSteps: history.week.totalSteps ?? 0,
+      totalCalories: history.week.totalCaloriesBurned ?? 0,
+      totalDuration: history.week.totalWorkoutDurationMinutes,
+      workoutsCompleted: history.week.workoutsCompleted,
+      waterIntakeMl: today.waterIntakeMl ?? 0,
       goalCompletion,
-      todaySteps,
-      todayCalories,
+      todaySteps: today.steps ?? 0,
+      todayCalories: today.caloriesBurned ?? 0,
       todayCaloriesConsumed,
-      todayActiveMinutes,
+      todayActiveMinutes: today.activeMinutes ?? 0,
       todayWalkingDistanceKm: todaySessions.length
         ? todaySessionDistanceKm
-        : todayActivities.reduce((sum, activity) => sum + (activity.distanceKm || 0), 0),
+        : today.distanceKm ?? 0,
       todaySessionActiveMinutes: Math.round(todaySessionDurationMinutes),
       todaySessionCalories,
       goal: req.user.goal,
     },
-    recentWorkouts: workouts.slice(0, 5),
-    recentActivities: activities,
+    weeklyOverview: history.week,
+    historicalData: history.history,
+    recentWorkouts: currentWeekWorkouts.slice(0, 5),
+    recentActivities: currentWeekActivities,
     recentSessions: sessions.slice(0, 10),
     weeklyProgress: {
-      dailySteps,
+      dailySteps: history.week.daily.map(({ dayKey, steps }) => ({ dayKey, steps: steps ?? 0 })),
       walkingDistanceKm: Number(sessionDistanceKm.toFixed(2)),
       activeMinutes: Math.round(sessionDurationMinutes),
-      sessions: sessions.filter((session) => session.status === 'completed').length,
+      sessions: currentWeekSessions.filter((session) => session.status === 'completed').length,
     },
     recentMeals: nutrition,
     totals: { meals: nutrition.length },

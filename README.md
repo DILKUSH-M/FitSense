@@ -36,6 +36,88 @@ The app uses a modular frontend with a sidebar shell and route-based feature pag
 ## MongoDB design
 The schema includes users, workouts, activities, nutrition, exercises, recommendations, privacy preferences, automatic activity sessions, and daily step summaries. User-owned tracking data is included in account export and deletion.
 
+## 90-day historical fitness data
+
+The dashboard returns daily records for the latest 90 local calendar days, plus
+Monday-to-Sunday weekly totals. It uses stored day keys and the browser's IANA
+time zone (or the account time-zone preference for clients that do not send
+one). Missing measurements stay blank in history charts; they are not treated
+as measured zeroes. Weekly totals are derived from the daily activity and
+workout records.
+
+### Public dataset source and import
+
+The optional public source is the [Fitbit Fitness Tracker Dataset by
+Mobius](https://www.kaggle.com/datasets/arashnic/fitbit) on Kaggle. Download
+the archive through Kaggle and extract `dailyActivity_merged.csv`. FitSense
+does not download the archive automatically and does not include participant
+data in this repository. The Kaggle listing identifies the dataset as CC0
+public-domain data; FitSense retains its dataset name, URL, participant ID,
+and source dates in imported records. The import report prints the selected participant's
+actual first and last dates and row count from the CSV; it does not extend or
+reinterpret the dataset's date coverage. By default, the importer chooses the
+participant with the most daily rows. Set `FITBIT_PARTICIPANT_ID` or pass
+`--participant-id` to select another ID.
+
+Import only `dailyActivity_merged.csv` through the isolated demo seed command:
+
+```powershell
+cd backend
+$env:FITBIT_DAILY_ACTIVITY_CSV = "C:\path\to\dailyActivity_merged.csv"
+npm run seed:history
+```
+
+Or pass a CSV path directly:
+
+```powershell
+npm run seed:history -- --csv "C:\path\to\dailyActivity_merged.csv" --participant-id 1503960366
+```
+
+Supported Fitbit fields include daily steps, calories, distance, the sum of
+very/fairly/lightly active minutes, and sedentary minutes retained as source
+metadata. The CSV does not provide daily water intake or individual workout
+sessions. On overlapping days, those generated-only measurements retain
+per-metric `sample_generated` provenance; imported Fitbit measurements retain
+`public_dataset` provenance.
+
+### Demo baseline and safety
+
+The command creates or reuses only the explicitly marked
+`history-demo@fitsense.invalid` profile by default. Change it with
+`FITNESS_HISTORY_DEMO_EMAIL` only to another address on the reserved `.invalid`
+domain. A matching existing account must already be marked as a demo profile;
+otherwise the command stops. The command never seeds a normal account, deletes
+records, or overwrites user-entered activity. Historical baseline records are
+read-only in the activity and workout pages.
+
+If you want to sign into the sample profile locally, set
+`FITNESS_HISTORY_DEMO_PASSWORD` before creating it. If omitted, the seed
+generates a random password that is not printed or stored in the repository.
+Existing demo passwords are never changed by rerunning the seed.
+
+With no CSV, the seed creates exactly 90 deterministic, clearly labelled
+synthetic daily activity rows and a fixed three-day-per-week sample workout
+schedule. The demo profile's sample end day is stored on first creation; it
+does not roll forward or fabricate new activity as time passes. Set
+`FITNESS_HISTORY_AS_OF_DAY=YYYY-MM-DD` for a reproducible initial window.
+Repeat the command to safely retry/import: generated rows are keyed by user/day
+and workout ID, repeated public rows update the matching baseline, and
+user-entered rows are preserved. The JSON report distinguishes created,
+updated, upgraded, and preserved rows. Because no CSV is shipped with FitSense,
+the public import count remains zero until a CSV path is supplied.
+
+### Daily updates and source labels
+
+User-entered activity measurements are stored as dated records with an
+available-metrics list; workout sessions are stored separately and their count
+and duration are calculated from those individual sessions. Device step
+summaries take precedence over other daily step values for that date. New
+records affect their calendar day and current weekly aggregation immediately;
+previous dates are not incremented or changed by the passage of time. Generated
+and public baselines are labelled in the dashboard and are read-only, while
+user-entered records remain editable. A chart gap means no value was available
+for that metric/day.
+
 ## Installation
 1. `cd FitSense`
 2. `npm install`

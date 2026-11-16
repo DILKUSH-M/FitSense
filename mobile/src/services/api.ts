@@ -40,7 +40,10 @@ export interface ActivitySession {
 export interface ActivityEntry {
   _id: string;
   date: string;
+  dayKey?: string;
   waterIntakeMl: number;
+  historicalBaseline?: boolean;
+  availableMetrics?: string[];
 }
 
 export interface NutritionEntry {
@@ -78,6 +81,9 @@ export interface DashboardData {
   };
   recentActivities: ActivityEntry[];
   recentSessions: ActivitySession[];
+  historicalData?: {
+    hasHistoricalSampleData: boolean;
+  };
   weeklyProgress: {
     dailySteps: { dayKey: string; steps: number }[];
     walkingDistanceKm: number;
@@ -161,7 +167,9 @@ export async function register(name: string, email: string, password: string) {
 }
 
 export const getCurrentUser = () => request<{ user: User }>('/auth/me');
-export const getDashboard = () => request<DashboardData>('/dashboard/summary');
+export const getDashboard = () => request<DashboardData>('/dashboard/summary', {
+  headers: { 'X-Time-Zone': Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
+});
 
 export async function createWorkout(payload: WorkoutInput) {
   return request('/workouts', { method: 'POST', body: JSON.stringify(payload) });
@@ -169,12 +177,13 @@ export async function createWorkout(payload: WorkoutInput) {
 
 export async function createActivity(payload: {
   date: string;
-  steps: number;
-  distanceKm: number;
-  caloriesBurned: number;
-  activeMinutes: number;
+  dayKey?: string;
+  steps?: number;
+  distanceKm?: number;
+  caloriesBurned?: number;
+  activeMinutes?: number;
   waterIntakeMl: number;
-  goal: number;
+  goal?: number;
   source: 'manual';
 }) {
   return request('/activities', { method: 'POST', body: JSON.stringify(payload) });

@@ -2,19 +2,55 @@ import { useEffect, useState } from 'react';
 import { Pencil, Trash2 } from 'lucide-react';
 import { createActivity, deleteActivity, getActivities, updateActivity } from '../services/api';
 
-const initialForm = {
-  date: new Date().toISOString().slice(0, 10),
-  steps: '',
-  distanceKm: '',
-  caloriesBurned: '',
-  activeMinutes: '',
-  waterIntakeMl: '',
-  goal: 8000,
-  source: 'manual',
-};
+const metricFields = ['steps', 'distanceKm', 'caloriesBurned', 'activeMinutes', 'waterIntakeMl'];
+
+function localDayKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function createInitialForm() {
+  return {
+    date: localDayKey(),
+    steps: '',
+    distanceKm: '',
+    caloriesBurned: '',
+    activeMinutes: '',
+    waterIntakeMl: '',
+    goal: 8000,
+    source: 'user_entered',
+  };
+}
+
+function sourceLabel(entry) {
+  if (entry.source === 'sample_generated') return 'Historical sample data (generated)';
+  if (entry.source === 'public_dataset') return 'Public dataset (Fitbit)';
+  if (entry.source === 'mixed') {
+    const sources = new Set(Object.values(entry.sourceMetadata?.metricSources || {}));
+    return sources.has('sample_generated')
+      ? 'Mixed sources (Fitbit public dataset + generated sample)'
+      : 'Mixed sources';
+  }
+  if (entry.source === 'estimated') return 'User estimate';
+  return 'User entered';
+}
+
+function metricText(entry, field, suffix = '') {
+  const available = Array.isArray(entry.availableMetrics)
+    ? entry.availableMetrics.includes(field)
+    : Number(entry[field]) !== 0;
+  if (!available) return '—';
+  const value = entry[field];
+  return value == null ? '—' : `${Number(value).toLocaleString()}${suffix}`;
+}
 
 export default function ActivityPage() {
-  const [form, setForm] = useState(initialForm);
+  const [form, setForm] = useState(createInitialForm);
   const [entries, setEntries] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -61,15 +97,29 @@ export default function ActivityPage() {
     setSaving(true);
     setError('');
     setNotice('');
+    const measurements = {};
+    for (const field of metricFields) {
+      if (String(form[field]).trim() === '') continue;
+      const value = Number(form[field]);
+      if (!Number.isFinite(value) || value < 0) {
+        setError('Activity measurements must be non-negative numbers.');
+        setSaving(false);
+        return;
+      }
+      measurements[field] = value;
+    }
+    if (!Object.keys(measurements).length) {
+      setError('Enter at least one activity measurement.');
+      setSaving(false);
+      return;
+    }
+
     const payload = {
-      ...form,
+      ...measurements,
       date: new Date(`${form.date}T12:00:00`).toISOString(),
-      steps: Number(form.steps || 0),
-      distanceKm: Number(form.distanceKm || 0),
-      caloriesBurned: Number(form.caloriesBurned || 0),
-      activeMinutes: Number(form.activeMinutes || 0),
-      waterIntakeMl: Number(form.waterIntakeMl || 0),
+      dayKey: form.date,
       goal: Number(form.goal || 8000),
+      source: form.source,
     };
 
     try {
@@ -80,7 +130,7 @@ export default function ActivityPage() {
         await createActivity(payload);
         setNotice('Activity record saved.');
       }
-      setForm(initialForm);
+      setForm(createInitialForm());
       setEditingId(null);
       await loadActivities();
     } catch (requestError) {
@@ -91,16 +141,21 @@ export default function ActivityPage() {
   };
 
   const editEntry = (entry) => {
+    const metricValue = (field) => (
+      Array.isArray(entry.availableMetrics)
+        ? entry.availableMetrics.includes(field) ? entry[field] ?? '' : ''
+        : Number(entry[field]) !== 0 ? entry[field] : ''
+    );
     setEditingId(entry._id);
     setForm({
-      date: new Date(entry.date).toISOString().slice(0, 10),
-      steps: entry.steps,
-      distanceKm: entry.distanceKm,
-      caloriesBurned: entry.caloriesBurned,
-      activeMinutes: entry.activeMinutes,
-      waterIntakeMl: entry.waterIntakeMl || 0,
-      goal: entry.goal,
-      source: entry.source,
+      date: entry.dayKey || localDayKey(new Date(entry.date)),
+      steps: metricValue('steps'),
+      distanceKm: metricValue('distanceKm'),
+      caloriesBurned: metricValue('caloriesBurned'),
+      activeMinutes: metricValue('activeMinutes'),
+      waterIntakeMl: metricValue('waterIntakeMl'),
+      goal: entry.goal ?? 8000,
+      source: entry.source === 'estimated' ? 'estimated' : 'user_entered',
     });
   };
 
@@ -136,10 +191,10 @@ export default function ActivityPage() {
             <label className="text-sm text-slate-300">Water (ml)<input type="number" min="0" name="waterIntakeMl" value={form.waterIntakeMl} onChange={handleChange} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label>
             <label className="text-sm text-slate-300">Step goal<input type="number" min="1" name="goal" value={form.goal} onChange={handleChange} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white" /></label>
           </div>
-          <label className="block text-sm text-slate-300">Data source<select name="source" value={form.source} onChange={handleChange} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white"><option value="manual">Manual entry</option><option value="estimated">Estimated</option></select></label>
+          <label className="block text-sm text-slate-300">Data source<select name="source" value={form.source} onChange={handleChange} className="mt-1 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-2 text-white"><option value="user_entered">Manual entry</option><option value="estimated">User estimate</option></select></label>
           <div className="flex gap-2">
             <button type="submit" disabled={saving} className="flex-1 rounded-xl bg-lime-500 px-4 py-2.5 font-semibold text-slate-950 disabled:opacity-50">{saving ? 'Saving…' : editingId ? 'Update activity' : 'Save activity'}</button>
-            {editingId ? <button type="button" onClick={() => { setEditingId(null); setForm(initialForm); }} className="rounded-xl border border-slate-600 px-4 text-slate-200">Cancel</button> : null}
+            {editingId ? <button type="button" onClick={() => { setEditingId(null); setForm(createInitialForm()); }} className="rounded-xl border border-slate-600 px-4 text-slate-200">Cancel</button> : null}
           </div>
         </form>
 
@@ -150,14 +205,22 @@ export default function ActivityPage() {
               {entries.map((entry) => (
                 <article key={entry._id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-800/70 p-3">
                   <div>
-                    <div className="font-medium text-white">{new Date(entry.date).toLocaleDateString()}</div>
-                    <div className="text-sm text-slate-400">{entry.steps.toLocaleString()} steps · {entry.distanceKm} km · {entry.activeMinutes} active min</div>
-                    <div className="text-xs text-slate-500">Source: {entry.source}</div>
+                    <div className="font-medium text-white">{entry.dayKey || new Date(entry.date).toLocaleDateString()}</div>
+                    <div className="text-sm text-slate-400">{metricText(entry, 'steps')} steps · {metricText(entry, 'distanceKm', ' km')} · {metricText(entry, 'activeMinutes', ' active min')}</div>
+                    <div className={`text-xs ${entry.historicalBaseline ? 'text-amber-200/80' : 'text-slate-500'}`}>
+                      {sourceLabel(entry)}{entry.sourceMetadata?.participantId ? ` · Participant ${entry.sourceMetadata.participantId}` : ''}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-300">
-                    <span>{entry.caloriesBurned} kcal · {entry.waterIntakeMl || 0} ml water</span>
-                    <button type="button" onClick={() => editEntry(entry)} aria-label="Edit activity" className="rounded-lg p-2 hover:bg-slate-700"><Pencil size={15} /></button>
-                    <button type="button" onClick={() => removeEntry(entry._id)} aria-label="Delete activity" className="rounded-lg p-2 text-rose-300 hover:bg-slate-700"><Trash2 size={15} /></button>
+                    <span>{metricText(entry, 'caloriesBurned', ' kcal')} · {metricText(entry, 'waterIntakeMl', ' ml water')}</span>
+                    {entry.historicalBaseline ? (
+                      <span className="px-2 text-xs text-slate-500">Read-only baseline</span>
+                    ) : (
+                      <>
+                        <button type="button" onClick={() => editEntry(entry)} aria-label="Edit activity" className="rounded-lg p-2 hover:bg-slate-700"><Pencil size={15} /></button>
+                        <button type="button" onClick={() => removeEntry(entry._id)} aria-label="Delete activity" className="rounded-lg p-2 text-rose-300 hover:bg-slate-700"><Trash2 size={15} /></button>
+                      </>
+                    )}
                   </div>
                 </article>
               ))}
